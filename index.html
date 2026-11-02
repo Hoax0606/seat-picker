@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>자리 선택</title>
+<style>
+  :root {
+    --bg: #f5f6fa;
+    --card: #ffffff;
+    --text: #222222;
+    --muted: #888888;
+    --accent: #3b82f6;
+    --line: #dddddd;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #15171c;
+      --card: #22252d;
+      --text: #eeeeee;
+      --muted: #999999;
+      --accent: #60a5fa;
+      --line: #3a3e48;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #15171c;
+    --card: #22252d;
+    --text: #eeeeee;
+    --muted: #999999;
+    --accent: #60a5fa;
+    --line: #3a3e48;
+  }
+  body {
+    margin: 0;
+    padding: 16px;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  main { max-width: 640px; margin: 0 auto; }
+  h1 { font-size: 1.6rem; margin: 8px 0 4px; }
+  .hint { color: var(--muted); margin: 0 0 16px; }
+  .status { color: var(--muted); font-size: 0.85rem; margin: 0 0 8px; min-height: 1.2em; }
+  input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 12px;
+    font-size: 1rem;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--card);
+    color: var(--text);
+  }
+  .columns {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin: 16px 0;
+  }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 16px;
+  }
+  .card.full { opacity: 0.6; }
+  .card h2 {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font-size: 1.2rem;
+    margin: 0 0 12px;
+  }
+  .count { color: var(--muted); font-size: 0.9rem; font-weight: normal; }
+  ol { margin: 0 0 12px; padding-left: 1.4rem; }
+  li { padding: 4px 0; }
+  li.empty { color: var(--muted); }
+  button {
+    width: 100%;
+    padding: 10px;
+    font-size: 0.95rem;
+    border: none;
+    border-radius: 8px;
+    background: var(--accent);
+    color: #fff;
+    cursor: pointer;
+  }
+  button:disabled { background: var(--line); color: var(--muted); cursor: not-allowed; }
+  .msg { min-height: 1.4em; color: var(--accent); font-weight: 600; }
+  .reset {
+    margin-top: 24px;
+    background: transparent;
+    color: var(--muted);
+    border: 1px solid var(--line);
+  }
+  @media (max-width: 420px) {
+    .columns { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>자리 선택</h1>
+  <p class="hint">이름을 입력하고 원하는 열을 고르세요. 선착순이며 열당 4자리입니다.</p>
+  <p id="status" class="status"></p>
+
+  <input id="name" placeholder="이름을 입력하세요" maxlength="10" autocomplete="off">
+
+  <div id="columns" class="columns"></div>
+  <p id="msg" class="msg" role="status"></p>
+
+  <button id="reset" class="reset">전체 초기화</button>
+</main>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script>
+  // Firebase 콘솔에서 웹 앱을 추가하면 나오는 설정값을 아래에 붙여넣으세요.
+  // 비워 두면 이 브라우저에만 저장되는 모드로 동작합니다.
+  const FIREBASE_CONFIG = {
+    apiKey: "AIzaSyDa5pi3VhLJHsOik3S9T3IbYMK2BGBhsiI",
+    authDomain: "baseball-seat.firebaseapp.com",
+    databaseURL: "https://baseball-seat-default-rtdb.firebaseio.com",
+    projectId: "baseball-seat",
+    storageBucket: "baseball-seat.firebasestorage.app",
+    messagingSenderId: "1057431183971",
+    appId: "1:1057431183971:web:ebc1707ec95db3a0c54e56",
+  };
+
+  const COLUMNS = [15, 18];
+  const SEATS = 4;
+  const KEY = 'seat-picker-v1';
+
+  const nameInput = document.getElementById('name');
+  const columnsEl = document.getElementById('columns');
+  const msgEl = document.getElementById('msg');
+  const statusEl = document.getElementById('status');
+
+  function emptyState() {
+    return Object.fromEntries(COLUMNS.map(c => [c, []]));
+  }
+
+  // 자리 규칙 검사. 통과하면 null, 아니면 안내 문구를 돌려준다.
+  function checkSit(state, col, name) {
+    if (COLUMNS.some(c => (state[c] || []).includes(name))) {
+      return `${name}님은 이미 자리를 선택했어요.`;
+    }
+    if ((state[col] || []).length >= SEATS) {
+      return `${col}열은 이미 찼어요.`;
+    }
+    return null;
+  }
+
+  function say(text) {
+    msgEl.textContent = text;
+  }
+
+  function render(state) {
+    columnsEl.textContent = '';
+    for (const col of COLUMNS) {
+      const people = state[col] || [];
+      const full = people.length >= SEATS;
+
+      const card = document.createElement('section');
+      card.className = 'card' + (full ? ' full' : '');
+
+      const head = document.createElement('h2');
+      head.textContent = `${col}열`;
+      const count = document.createElement('span');
+      count.className = 'count';
+      count.textContent = `${people.length} / ${SEATS}`;
+      head.append(count);
+
+      const list = document.createElement('ol');
+      for (let i = 0; i < SEATS; i++) {
+        const li = document.createElement('li');
+        if (people[i]) {
+          li.textContent = people[i];
+        } else {
+          li.textContent = '빈 자리';
+          li.className = 'empty';
+        }
+        list.append(li);
+      }
+
+      const btn = document.createElement('button');
+      btn.textContent = full ? '마감' : '이 열에 앉기';
+      btn.disabled = full;
+      btn.addEventListener('click', () => sit(col));
+
+      card.append(head, list, btn);
+      columnsEl.append(card);
+    }
+  }
+
+  // ---------- 저장소: Firebase 또는 이 브라우저 ----------
+
+  const useFirebase = Boolean(FIREBASE_CONFIG.databaseURL);
+  let store;
+
+  if (useFirebase) {
+    firebase.initializeApp(FIREBASE_CONFIG);
+    const ref = firebase.database().ref('seats');
+    statusEl.textContent = '실시간 공유 중';
+
+    store = {
+      subscribe(onChange) {
+        ref.on('value', snap => onChange(snap.val() || emptyState()));
+      },
+      // 전체 상태를 한 번에 갱신해서 동시에 눌러도 규칙이 깨지지 않게 한다.
+      sit(col, name) {
+        let reason = null;
+        return ref.transaction(current => {
+          const state = current || emptyState();
+          reason = checkSit(state, col, name);
+          if (reason) return; // undefined를 돌려주면 저장을 취소한다
+          state[col] = [...(state[col] || []), name];
+          return state;
+        }).then(result => ({ ok: result.committed, msg: reason }));
+      },
+      reset() {
+        return ref.set(emptyState());
+      },
+    };
+  } else {
+    const load = () => {
+      try {
+        const saved = JSON.parse(localStorage.getItem(KEY));
+        if (saved) return saved;
+      } catch {}
+      return emptyState();
+    };
+    const save = state => {
+      try { localStorage.setItem(KEY, JSON.stringify(state)); } catch {}
+    };
+
+    statusEl.textContent = '이 브라우저에만 저장됩니다';
+
+    store = {
+      subscribe(onChange) {
+        onChange(load());
+        // 같은 브라우저의 다른 탭에서 바뀌면 화면도 갱신
+        window.addEventListener('storage', () => onChange(load()));
+      },
+      sit(col, name) {
+        const state = load();
+        const reason = checkSit(state, col, name);
+        if (reason) return Promise.resolve({ ok: false, msg: reason });
+        state[col] = [...(state[col] || []), name];
+        save(state);
+        return Promise.resolve({ ok: true });
+      },
+      reset() {
+        save(emptyState());
+        return Promise.resolve();
+      },
+    };
+  }
+
+  async function sit(col) {
+    const name = nameInput.value.trim();
+    if (!name) return say('이름을 입력하세요.');
+
+    const { ok, msg } = await store.sit(col, name);
+    if (!ok) return say(msg || '앉지 못했어요. 다시 시도해 주세요.');
+
+    say(`${name}님, ${col}열에 앉았어요.`);
+    nameInput.value = '';
+  }
+
+  document.getElementById('reset').addEventListener('click', async () => {
+    if (!confirm('모든 선택을 초기화할까요?')) return;
+    await store.reset();
+    say('초기화했어요.');
+  });
+
+  store.subscribe(render);
+</script>
+</body>
+</html>
