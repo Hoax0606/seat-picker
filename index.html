@@ -88,12 +88,6 @@
   }
   button:disabled { background: var(--line); color: var(--muted); cursor: not-allowed; }
   .msg { min-height: 1.4em; color: var(--accent); font-weight: 600; }
-  .reset {
-    margin-top: 24px;
-    background: transparent;
-    color: var(--muted);
-    border: 1px solid var(--line);
-  }
   @media (max-width: 420px) {
     .columns { grid-template-columns: 1fr; }
   }
@@ -109,8 +103,6 @@
 
   <div id="columns" class="columns"></div>
   <p id="msg" class="msg" role="status"></p>
-
-  <button id="reset" class="reset">전체 초기화</button>
 </main>
 
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
@@ -219,9 +211,6 @@
           return state;
         }).then(result => ({ ok: result.committed, msg: reason }));
       },
-      reset() {
-        return ref.set(emptyState());
-      },
     };
   } else {
     const load = () => {
@@ -251,10 +240,6 @@
         save(state);
         return Promise.resolve({ ok: true });
       },
-      reset() {
-        save(emptyState());
-        return Promise.resolve();
-      },
     };
   }
 
@@ -268,12 +253,6 @@
     say(`${name}님, ${col}열에 앉았어요.`);
     nameInput.value = '';
   }
-
-  document.getElementById('reset').addEventListener('click', async () => {
-    if (!confirm('모든 선택을 초기화할까요?')) return;
-    await store.reset();
-    say('초기화했어요.');
-  });
 
   store.subscribe(render);
 </script>
